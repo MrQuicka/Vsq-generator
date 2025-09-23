@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VSQ Generator - Excel to CANoe Sequence</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            width: 100%;
+            padding: 40px;
+            backdrop-filter: blur(10px);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            transition: all 0.3s ease;
+            background: #f8f9fa;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f0ff;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+        }
+
+        .upload-area.dragover {
+            background: #e0e7ff;
+            border-color: #764ba2;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .upload-text {
+            color: #333;
+            font-size: 1.2em;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .file-info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e0e7ff;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .file-info.show {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .output-name-group {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .output-name-group.show {
+            display: block;
+        }
+
+        .output-name-group label {
+            display: block;
+            color: #333;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .output-name-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e7ff;
+            border-radius: 10px;
+            font-size: 1em;
+            transition: border-color 0.3s ease;
+        }
+
+        .output-name-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: #e0e7ff;
+            color: #667eea;
+        }
+
+        .btn-secondary:hover {
+            background: #d0d9ff;
+            transform: translateY(-2px);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #00b09b 0%, #96c93d 100%);
+            color: white;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 176, 155, 0.4);
+        }
+
+        .result-container {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .result-container.show {
+            display: block;
+            animation: slideIn 0.5s ease;
+        }
+
+        .result-box {
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+
+        .result-success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+
+        .result-error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .result-warning {
+            background: #fff3cd;
+            border: 1px solid #ffeeba;
+            color: #856404;
+        }
+
+        .result-info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+
+        .result-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .result-details {
+            margin-top: 10px;
+        }
+
+        .result-details ul {
+            list-style: none;
+            padding-left: 20px;
+        }
+
+        .result-details li {
+            margin: 5px 0;
+            position: relative;
+        }
+
+        .result-details li::before {
+            content: "▸";
+            position: absolute;
+            left: -15px;
+            color: #667eea;
+        }
+
+        .spinner {
+            display: none;
+            width: 50px;
+            height: 50px;
+            margin: 20px auto;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .spinner.show {
+            display: block;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .features {
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 1px solid #e0e7ff;
+        }
+
+        .features h3 {
+            color: #333;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .feature {
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .feature-icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .feature-text {
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 VSQ Generator</h1>
+        <p class="subtitle">Převod Excel souborů na Vector CANoe sekvence</p>
+        
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <div class="upload-text">Klikněte nebo přetáhněte Excel soubor</div>
+            <div class="upload-hint">Podporované formáty: .xlsx, .xls</div>
+            <input type="file" id="fileInput" accept=".xlsx,.xls">
+        </div>
+
+        <div class="file-info" id="fileInfo">
+            <strong>Vybraný soubor:</strong> <span id="fileName"></span>
+        </div>
+
+        <div class="output-name-group" id="outputNameGroup">
+            <label for="outputName">Název výstupního souboru (volitelné):</label>
+            <input type="text" id="outputName" placeholder="Ponechte prázdné pro automatický název">
+        </div>
+
+        <div class="button-group" id="buttonGroup" style="display: none;">
+            <button class="btn btn-secondary" id="cancelBtn">Zrušit</button>
+            <button class="btn btn-primary" id="processBtn">Zpracovat</button>
+        </div>
+
+        <div class="spinner" id="spinner"></div>
+
+        <div class="result-container" id="resultContainer"></div>
+
+        <div class="features">
+            <h3>Funkce aplikace</h3>
+            <div class="features-grid">
+                <div class="feature">
+                    <div class="feature-icon">🔍</div>
+                    <div class="feature-text">Automatická detekce sloupců</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">✅</div>
+                    <div class="feature-text">Validace DLC a dat</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🔧</div>
+                    <div class="feature-text">Podpora různých formátů</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">⚡</div>
+                    <div class="feature-text">Rychlé zpracování</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const outputNameGroup = document.getElementById('outputNameGroup');
+        const outputName = document.getElementById('outputName');
+        const buttonGroup = document.getElementById('buttonGroup');
+        const processBtn = document.getElementById('processBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const spinner = document.getElementById('spinner');
+        const resultContainer = document.getElementById('resultContainer');
+
+        let selectedFile = null;
+
+        // Click to upload
+        uploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // File selection
+        fileInput.addEventListener('change', (e) => {
+            handleFileSelection(e.target.files[0]);
+        });
+
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelection(files[0]);
+            }
+        });
+
+        function handleFileSelection(file) {
+            if (!file) return;
+            
+            const validExtensions = ['xlsx', 'xls'];
+            const fileExtension = file.name.split('.').pop().toLowerCase();
+            
+            if (!validExtensions.includes(fileExtension)) {
+                showResult('error', 'Neplatný formát souboru', 'Prosím vyberte Excel soubor (.xlsx nebo .xls)');
+                return;
+            }
+            
+            selectedFile = file;
+            fileName.textContent = file.name;
+            fileInfo.classList.add('show');
+            outputNameGroup.classList.add('show');
+            buttonGroup.style.display = 'flex';
+            resultContainer.classList.remove('show');
+            
+            // Set default output name
+            const defaultName = file.name.replace(/\.[^/.]+$/, '');
+            outputName.placeholder = `${defaultName}.vsq`;
+        }
+
+        cancelBtn.addEventListener('click', () => {
+            resetForm();
+        });
+
+        processBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+            
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            
+            if (outputName.value.trim()) {
+                formData.append('output_name', outputName.value.trim());
+            }
+            
+            processBtn.disabled = true;
+            spinner.classList.add('show');
+            resultContainer.classList.remove('show');
+            
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showSuccessResult(result);
+                } else {
+                    showResult('error', 'Chyba při zpracování', result.error || 'Neznámá chyba');
+                }
+            } catch (error) {
+                showResult('error', 'Chyba připojení', 'Nelze se připojit k serveru: ' + error.message);
+            } finally {
+                processBtn.disabled = false;
+                spinner.classList.remove('show');
+            }
+        });
+
+        function showSuccessResult(result) {
+            let html = `
+                <div class="result-box result-success">
+                    <div class="result-title">✅ Úspěšně zpracováno!</div>
+                    <div class="result-details">
+                        <ul>
+                            <li>Výstupní soubor: <strong>${result.filename}</strong></li>
+                            <li>Zpracováno zpráv: <strong>${result.messages_processed}</strong></li>
+                        </ul>
+                    </div>
+                    <div style="margin-top: 15px;">
+                        <a href="/download/${result.filename}" class="btn btn-success">
+                            📥 Stáhnout VSQ soubor
+                        </a>
+                    </div>
+                </div>
+            `;
+            
+            if (result.detected_columns) {
+                html += `
+                    <div class="result-box result-info">
+                        <div class="result-title">ℹ️ Detekované sloupce</div>
+                        <div class="result-details">
+                            <ul>
+                                ${Object.entries(result.detected_columns)
+                                    .map(([key, value]) => `<li>${key}: <strong>${value}</strong></li>`)
+                                    .join('')}
+                            </ul>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            if (result.warnings && result.warnings.length > 0) {
+                html += `
+                    <div class="result-box result-warning">
+                        <div class="result-title">⚠️ Varování</div>
+                        <div class="result-details">
+                            <ul>
+                                ${result.warnings.map(w => `<li>${w}</li>`).join('')}
+                            </ul>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            resultContainer.innerHTML = html;
+            resultContainer.classList.add('show');
+        }
+
+        function showResult(type, title, message) {
+            const typeClass = type === 'error' ? 'result-error' : 
+                             type === 'warning' ? 'result-warning' : 
+                             type === 'success' ? 'result-success' : 'result-info';
+            
+            resultContainer.innerHTML = `
+                <div class="result-box ${typeClass}">
+                    <div class="result-title">${title}</div>
+                    ${message ? `<div>${message}</div>` : ''}
+                </div>
+            `;
+            resultContainer.classList.add('show');
+        }
+
+        function resetForm() {
+            selectedFile = null;
+            fileInput.value = '';
+            fileName.textContent = '';
+            outputName.value = '';
+            fileInfo.classList.remove('show');
+            outputNameGroup.classList.remove('show');
+            buttonGroup.style.display = 'none';
+            resultContainer.classList.remove('show');
+            resultContainer.innerHTML = '';
+        }
+    </script>
+</body>
+</html>
