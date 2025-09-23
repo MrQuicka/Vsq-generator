@@ -461,3 +461,359 @@
             visibility: visible;
             opacity: 1;
         }
+    </style>
+</head>
+<body>
+    <div class="dark-mode-toggle" id="darkModeToggle" title="Přepnout tmavý režim">
+        <span id="themeIcon">🌙</span>
+    </div>
+
+    <div class="container">
+        <h1>🚀 VSQ Generator v2.0</h1>
+        <div class="version-badge">
+            <span>Extended CAN ID | Custom Timeout | Live Preview</span>
+        </div>
+        
+        <div class="main-grid">
+            <!-- Upload Section -->
+            <div class="section">
+                <h2 class="section-title">
+                    <span>📁</span> Nahrát Excel soubor
+                </h2>
+                <div class="upload-area" id="uploadArea">
+                    <div style="font-size: 3em; margin-bottom: 15px;">📊</div>
+                    <div style="font-size: 1.2em; margin-bottom: 10px;">Klikněte nebo přetáhněte Excel soubor</div>
+                    <div style="color: #666; font-size: 0.9em;">Podporované formáty: .xlsx, .xls</div>
+                    <input type="file" id="fileInput" accept=".xlsx,.xls">
+                </div>
+                
+                <div id="fileInfo" style="display: none; margin-top: 15px; padding: 10px; background: #e0e7ff; border-radius: 8px;">
+                    <strong>Vybraný soubor:</strong> <span id="fileName"></span>
+                </div>
+            </div>
+
+            <!-- Settings Section -->
+            <div class="section">
+                <h2 class="section-title">
+                    <span>⚙️</span> Nastavení konverze
+                </h2>
+                <div class="settings-grid">
+                    <div class="form-group">
+                        <label for="outputName">Název výstupního souboru:</label>
+                        <input type="text" id="outputName" placeholder="Automatický název">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="canChannel">CAN kanál:</label>
+                        <select id="canChannel">
+                            <option value="CAN1">CAN1</option>
+                            <option value="CAN2">CAN2</option>
+                            <option value="CAN3">CAN3</option>
+                            <option value="CAN4">CAN4</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="timeout">
+                            Výchozí timeout (ms):
+                            <span class="tooltip">ℹ️
+                                <span class="tooltiptext">Časový limit pro odpověď. Rozsah: 1-60000 ms</span>
+                            </span>
+                        </label>
+                        <div class="timeout-group">
+                            <input type="range" id="timeout" min="100" max="10000" value="3000" step="100">
+                            <div class="timeout-display" id="timeoutDisplay">3000 ms</div>
+                        </div>
+                    </div>
+
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="forceExtended">
+                        <label for="forceExtended">
+                            Vynutit Extended CAN ID (29-bit)
+                            <span class="tooltip">ℹ️
+                                <span class="tooltiptext">Všechny ID budou považovány za extended (29-bit), i když jsou menší než 0x7FF</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-secondary" id="previewBtn" style="display: none;">
+                        👁️ Náhled
+                    </button>
+                    <button class="btn btn-primary" id="processBtn" style="display: none;">
+                        ⚡ Zpracovat
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="spinner" id="spinner"></div>
+
+        <!-- Preview Section -->
+        <div class="preview-section" id="previewSection">
+            <div class="preview-header">
+                <h3 style="color: var(--primary);">📋 Náhled VSQ výstupu</h3>
+                <div class="preview-stats">
+                    <span class="stat-badge stat-standard" id="standardCount">Standard: 0</span>
+                    <span class="stat-badge stat-extended" id="extendedCount">Extended: 0</span>
+                </div>
+            </div>
+            <div class="preview-container" id="previewContainer"></div>
+        </div>
+
+        <!-- Result Section -->
+        <div class="result-container" id="resultContainer"></div>
+    </div>
+
+    <script>
+        // Elements
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const outputName = document.getElementById('outputName');
+        const canChannel = document.getElementById('canChannel');
+        const timeout = document.getElementById('timeout');
+        const timeoutDisplay = document.getElementById('timeoutDisplay');
+        const forceExtended = document.getElementById('forceExtended');
+        const previewBtn = document.getElementById('previewBtn');
+        const processBtn = document.getElementById('processBtn');
+        const spinner = document.getElementById('spinner');
+        const previewSection = document.getElementById('previewSection');
+        const previewContainer = document.getElementById('previewContainer');
+        const resultContainer = document.getElementById('resultContainer');
+        const darkModeToggle = document.getElementById('darkModeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const standardCount = document.getElementById('standardCount');
+        const extendedCount = document.getElementById('extendedCount');
+
+        let selectedFile = null;
+        let lastPreviewData = null;
+
+        // Dark mode toggle
+        darkModeToggle.addEventListener('click', () => {
+            document.body.classList.toggle('dark-mode');
+            themeIcon.textContent = document.body.classList.contains('dark-mode') ? '☀️' : '🌙';
+            localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
+        });
+
+        // Load dark mode preference
+        if (localStorage.getItem('darkMode') === 'true') {
+            document.body.classList.add('dark-mode');
+            themeIcon.textContent = '☀️';
+        }
+
+        // Timeout slider
+        timeout.addEventListener('input', (e) => {
+            timeoutDisplay.textContent = e.target.value + ' ms';
+        });
+
+        // File upload
+        uploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFileSelection(e.target.files[0]);
+        });
+
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelection(files[0]);
+            }
+        });
+
+        function handleFileSelection(file) {
+            if (!file) return;
+            
+            const validExtensions = ['xlsx', 'xls'];
+            const fileExtension = file.name.split('.').pop().toLowerCase();
+            
+            if (!validExtensions.includes(fileExtension)) {
+                showResult('error', '❌ Neplatný formát', 'Prosím vyberte Excel soubor (.xlsx nebo .xls)');
+                return;
+            }
+            
+            selectedFile = file;
+            fileName.textContent = file.name;
+            fileInfo.style.display = 'block';
+            previewBtn.style.display = 'inline-block';
+            processBtn.style.display = 'inline-block';
+            previewSection.classList.remove('show');
+            resultContainer.classList.remove('show');
+            
+            // Set default output name
+            const defaultName = file.name.replace(/\.[^/.]+$/, '');
+            outputName.placeholder = `${defaultName}.vsq`;
+        }
+
+        // Preview button
+        previewBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+            
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            formData.append('timeout', timeout.value);
+            formData.append('can_channel', canChannel.value);
+            formData.append('force_extended', forceExtended.checked);
+            
+            spinner.classList.add('show');
+            previewSection.classList.remove('show');
+            
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    lastPreviewData = result;
+                    showPreview(result);
+                } else {
+                    showResult('error', '❌ Chyba', result.error);
+                }
+            } catch (error) {
+                showResult('error', '❌ Chyba připojení', error.message);
+            } finally {
+                spinner.classList.remove('show');
+            }
+        });
+
+        // Process button
+        processBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+            
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            formData.append('output_name', outputName.value || '');
+            formData.append('timeout', timeout.value);
+            formData.append('can_channel', canChannel.value);
+            formData.append('force_extended', forceExtended.checked);
+            
+            processBtn.disabled = true;
+            spinner.classList.add('show');
+            resultContainer.classList.remove('show');
+            
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showPreview(result);
+                    showSuccessResult(result);
+                } else {
+                    showResult('error', '❌ Chyba při zpracování', result.error);
+                }
+            } catch (error) {
+                showResult('error', '❌ Chyba připojení', error.message);
+            } finally {
+                processBtn.disabled = false;
+                spinner.classList.remove('show');
+            }
+        });
+
+        function showPreview(result) {
+            if (!result.preview || result.preview.length === 0) return;
+            
+            // Update stats
+            standardCount.textContent = `Standard: ${result.standard_ids || 0}`;
+            extendedCount.textContent = `Extended: ${result.extended_ids || 0}`;
+            
+            // Generate preview HTML
+            let previewHTML = '';
+            result.preview.forEach(line => {
+                const idClass = line.is_extended ? 'extended' : '';
+                const idDisplay = line.can_id + (line.is_extended ? ' (EXT)' : '');
+                
+                previewHTML += `
+                    <div class="preview-line">
+                        <span class="preview-line-number">${line.line_num}:</span>
+                        <span class="preview-can-id ${idClass}">${idDisplay}</span> | 
+                        <span class="preview-data">${line.data}</span> | 
+                        <span class="preview-timeout">${line.timeout}ms</span>
+                    </div>
+                `;
+            });
+            
+            if (result.messages_processed > 10) {
+                previewHTML += `
+                    <div style="text-align: center; margin-top: 15px; color: #95a5a6;">
+                        ... a dalších ${result.messages_processed - 10} zpráv ...
+                    </div>
+                `;
+            }
+            
+            previewContainer.innerHTML = previewHTML;
+            previewSection.classList.add('show');
+        }
+
+        function showSuccessResult(result) {
+            let html = `
+                <div class="result-box result-success">
+                    <h3>✅ Úspěšně zpracováno!</h3>
+                    <div style="margin-top: 15px;">
+                        <p><strong>Výstupní soubor:</strong> ${result.filename}</p>
+                        <p><strong>Zpracováno zpráv:</strong> ${result.messages_processed}</p>
+                        <p><strong>Standard ID:</strong> ${result.standard_ids || 0} | <strong>Extended ID:</strong> ${result.extended_ids || 0}</p>
+                    </div>
+                    <div style="margin-top: 20px; text-align: center;">
+                        <a href="/download/${result.filename}" class="btn btn-success">
+                            📥 Stáhnout VSQ soubor
+                        </a>
+                    </div>
+                </div>
+            `;
+            
+            if (result.warnings && result.warnings.length > 0) {
+                html += `
+                    <div class="result-box result-warning" style="margin-top: 15px;">
+                        <h4>⚠️ Varování</h4>
+                        <ul style="margin-top: 10px;">
+                            ${result.warnings.map(w => `<li>${w}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            resultContainer.innerHTML = html;
+            resultContainer.classList.add('show');
+        }
+
+        function showResult(type, title, message) {
+            const typeClass = type === 'error' ? 'result-error' : 
+                             type === 'warning' ? 'result-warning' : 
+                             'result-success';
+            
+            resultContainer.innerHTML = `
+                <div class="result-box ${typeClass}">
+                    <h3>${title}</h3>
+                    ${message ? `<p style="margin-top: 10px;">${message}</p>` : ''}
+                </div>
+            `;
+            resultContainer.classList.add('show');
+        }
+    </script>
+</body>
+</html>
