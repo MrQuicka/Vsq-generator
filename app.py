@@ -8,8 +8,7 @@ import os
 import re
 from datetime import datetime
 from werkzeug.utils import secure_filename
-import xml.etree.ElementTree as ET
-from xml.dom import minidom
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -39,36 +38,64 @@ def parse_dlc(dlc_string):
     # Try to extract number from strings like "DLC = 8"
     match = re.search(r'\d+', dlc_str)
     if match:
-        return int(match.group())
+        dlc = int(match.group())
+        # Validate DLC range (0-8 for standard CAN, 0-64 for CAN FD)
+        if dlc > 64:
+            return 8
+        return dlc
     
     return 8  # Default DLC if parsing fails
 
-def parse_can_id(can_id_string):
-    """Parse CAN ID from various formats"""
+def detect_can_id_type(can_id_int):
+    """Detect if CAN ID is standard (11-bit) or extended (29-bit)"""
+    if can_id_int > 0x7FF:  # Greater than 11-bit max value (2047)
+        return 'extended', True
+    return 'standard', False
+
+def parse_can_id(can_id_string, force_extended=False):
+    """Parse CAN ID from various formats with extended ID support"""
     if pd.isna(can_id_string):
-        return None
+        return None, False
     
     can_id_str = str(can_id_string).strip()
     
-    # Remove common prefixes
-    can_id_str = can_id_str.replace('0x', '').replace('0X', '')
+    # Check if explicitly marked as extended
+    is_extended = force_extended or 'x' in can_id_str.lower() or 'ext' in can_id_str.lower()
     
-    # Try to parse as hex
+    # Remove common prefixes and extended markers
+    can_id_str = re.sub(r'0x|0X|x|X|ext|EXT', '', can_id_str)
+    
     try:
-        # If it's already an integer (from Excel), convert to hex string
+        # Parse as hex
         if isinstance(can_id_string, (int, float)):
-            return f"0x{int(can_id_string):03X}"
+            can_id_int = int(can_id_string)
         else:
-            # Parse hex string
             can_id_int = int(can_id_str, 16)
-            return f"0x{can_id_int:03X}"
+        
+        # Auto-detect if extended based on value
+        id_type, detected_extended = detect_can_id_type(can_id_int)
+        is_extended = is_extended or detected_extended
+        
+        # Validate range
+        if is_extended:
+            if can_id_int > 0x1FFFFFFF:  # 29-bit max
+                return None, False
+            # Format extended ID with 8 hex digits and 'x' suffix
+            return f"0x{can_id_int:08X}x", True
+        else:
+            if can_id_int > 0x7FF:  # Standard 11-bit max
+                # Automaticky převést na extended pokud je větší
+                return f"0x{can_id_int:08X}x", True
+            # Format standard ID with 3 hex digits
+            return f"0x{can_id_int:03X}", False
+            
     except (ValueError, TypeError):
-        return None
+        return None, False
 
 def parse_data_bytes(data_string, dlc):
     """Parse data bytes from various formats"""
     if pd.isna(data_string):
-        return ' '.join(['00'] * dlc)
+        return ' '.join(['00'] * min(dlc, 8))
     
     data_str = str(data_string).strip()
     
@@ -82,6 +109,9 @@ def parse_data_bytes(data_string, dlc):
     formatted_bytes = []
     for byte in bytes_list[:dlc]:  # Only take as many bytes as DLC specifies
         byte = byte.upper().replace('0X', '')
+        # Validate hex characters
+        if not all(c in '0123456789ABCDEF' for c in byte):
+            byte = '00'  # Replace invalid with 00
         if len(byte) == 1:
             byte = '0' + byte
         elif len(byte) > 2:
@@ -100,16 +130,15 @@ def detect_columns(df):
         'can_id': None,
         'dlc': None,
         'data': None,
-        'address': None
+        'address': None,
+        'timeout': None  # Přidáno pro detekci timeout sloupce
     }
     
-    # Convert column names to lowercase for easier matching
-    columns_lower = {col: col for col in df.columns}
     for col in df.columns:
         col_lower = str(col).lower()
         
         # Detect CAN ID column
-        if any(keyword in col_lower for keyword in ['can', 'id', 'canid', 'can_id', 'identifier']):
+        if any(keyword in col_lower for keyword in ['can', 'id', 'canid', 'can_id', 'identifier', 'pgn']):
             if columns_map['can_id'] is None:
                 columns_map['can_id'] = col
         
@@ -123,12 +152,33 @@ def detect_columns(df):
             if columns_map['data'] is None:
                 columns_map['data'] = col
         
+        # Detect timeout column
+        if any(keyword in col_lower for keyword in ['timeout', 'time', 'delay', 'wait']):
+            if columns_map['timeout'] is None:
+                columns_map['timeout'] = col
+        
         # Detect address column (optional)
-        if any(keyword in col_lower for keyword in ['address', 'addr', 'name']):
+        if any(keyword in col_lower for keyword in ['address', 'addr', 'name', 'description']):
             if columns_map['address'] is None:
                 columns_map['address'] = col
     
     return columns_map
+
+def parse_timeout(timeout_value, default_timeout):
+    """Parse timeout value from Excel cell"""
+    if pd.isna(timeout_value):
+        return default_timeout
+    
+    try:
+        timeout = int(float(str(timeout_value).strip()))
+        # Validate reasonable timeout range (1ms to 60000ms)
+        if timeout < 1:
+            return default_timeout
+        if timeout > 60000:
+            return 60000
+        return timeout
+    except (ValueError, TypeError):
+        return default_timeout
 
 def create_vsq_xml_header(sequence_name="GeneratedSequence"):
     """Create the XML header for VSQ file"""
@@ -156,8 +206,18 @@ def create_vsq_xml_header(sequence_name="GeneratedSequence"):
 </VisualSequence>'''
     return xml_header
 
-def process_excel_to_vsq(file_path, output_name=None):
-    """Main function to process Excel file and generate VSQ"""
+def process_excel_to_vsq(file_path, output_name=None, default_timeout=3000, 
+                         can_channel='CAN1', force_extended=False):
+    """
+    Main function to process Excel file and generate VSQ
+    
+    Args:
+        file_path: Path to Excel file
+        output_name: Custom output filename
+        default_timeout: Default timeout in ms (user configurable)
+        can_channel: CAN channel to use (CAN1, CAN2, etc.)
+        force_extended: Force all IDs to be treated as extended
+    """
     try:
         # Read Excel file
         df = pd.read_excel(file_path, sheet_name=0)
@@ -169,7 +229,7 @@ def process_excel_to_vsq(file_path, output_name=None):
         columns = detect_columns(df)
         
         if not columns['can_id'] or not columns['data']:
-            return None, "Could not detect CAN ID or Data columns in the Excel file"
+            return None, {'success': False, 'error': 'Could not detect CAN ID or Data columns in the Excel file'}
         
         # Generate output filename
         if not output_name:
@@ -184,17 +244,31 @@ def process_excel_to_vsq(file_path, output_name=None):
         # Process each row
         warnings = []
         processed_count = 0
+        standard_ids = 0
+        extended_ids = 0
+        preview_lines = []  # Pro live preview
         
         for idx, row in df.iterrows():
             # Skip header rows or rows without CAN ID
-            can_id = parse_can_id(row[columns['can_id']])
+            can_id, is_extended = parse_can_id(row[columns['can_id']], force_extended)
             if not can_id:
                 continue
+            
+            # Count ID types
+            if is_extended:
+                extended_ids += 1
+            else:
+                standard_ids += 1
             
             # Get DLC
             dlc = 8  # Default
             if columns['dlc']:
                 dlc = parse_dlc(row[columns['dlc']])
+            
+            # Get timeout (from column or default)
+            timeout = default_timeout
+            if columns['timeout']:
+                timeout = parse_timeout(row[columns['timeout']], default_timeout)
             
             # Get data bytes
             data_bytes = parse_data_bytes(row[columns['data']], dlc)
@@ -205,9 +279,21 @@ def process_excel_to_vsq(file_path, output_name=None):
                 warnings.append(f"Row {idx+1}: Data bytes ({actual_bytes}) exceed DLC ({dlc})")
             
             # Create VSQ line
-            # Format: sequence_number, action, channel::address, operator, data, timeout, , bool, bool, bool
-            vsq_line = f"1,Send CAN Raw Frame,CAN1::{can_id},=,{data_bytes},3000,,False,False,False"
+            vsq_line = f"1,Send CAN Raw Frame,{can_channel}::{can_id},=,{data_bytes},{timeout},,False,False,False"
             vsq_lines.append(vsq_line)
+            
+            # Add to preview (first 10 lines)
+            if processed_count < 10:
+                preview_lines.append({
+                    'line_num': processed_count + 1,
+                    'can_id': can_id,
+                    'is_extended': is_extended,
+                    'dlc': dlc,
+                    'data': data_bytes,
+                    'timeout': timeout,
+                    'raw': vsq_line
+                })
+            
             processed_count += 1
         
         # Write to file
@@ -218,8 +304,16 @@ def process_excel_to_vsq(file_path, output_name=None):
             'success': True,
             'filename': f"{output_name}.vsq",
             'messages_processed': processed_count,
+            'standard_ids': standard_ids,
+            'extended_ids': extended_ids,
             'warnings': warnings,
-            'detected_columns': {k: v for k, v in columns.items() if v is not None}
+            'detected_columns': {k: v for k, v in columns.items() if v is not None},
+            'preview': preview_lines,
+            'settings': {
+                'default_timeout': default_timeout,
+                'can_channel': can_channel,
+                'force_extended': force_extended
+            }
         }
         
         return output_path, result
@@ -230,11 +324,11 @@ def process_excel_to_vsq(file_path, output_name=None):
 @app.route('/')
 def index():
     """Main page"""
-    return render_template('index.html')
+    return render_template('index_v2.html')
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Handle file upload and processing"""
+    """Handle file upload and processing with advanced options"""
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file provided'}), 400
     
@@ -251,16 +345,85 @@ def upload_file():
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
         
-        # Get custom output name if provided
+        # Get advanced parameters
         output_name = request.form.get('output_name', None)
+        default_timeout = int(request.form.get('timeout', 3000))
+        can_channel = request.form.get('can_channel', 'CAN1')
+        force_extended = request.form.get('force_extended', 'false').lower() == 'true'
         
         # Process the file
-        output_path, result = process_excel_to_vsq(file_path, output_name)
+        output_path, result = process_excel_to_vsq(
+            file_path, 
+            output_name, 
+            default_timeout,
+            can_channel,
+            force_extended
+        )
         
         if result['success']:
             return jsonify(result), 200
         else:
             return jsonify(result), 500
+    
+    return jsonify({'success': False, 'error': 'Invalid file type'}), 400
+
+@app.route('/preview', methods=['POST'])
+def preview_only():
+    """Generate preview without saving file"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"preview_{timestamp}_{filename}"
+        
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(file_path)
+        
+        # Get parameters
+        default_timeout = int(request.form.get('timeout', 3000))
+        can_channel = request.form.get('can_channel', 'CAN1')
+        force_extended = request.form.get('force_extended', 'false').lower() == 'true'
+        
+        try:
+            # Read and analyze file
+            df = pd.read_excel(file_path, sheet_name=0)
+            df = df.dropna(how='all')
+            columns = detect_columns(df)
+            
+            preview_data = {
+                'success': True,
+                'total_rows': len(df),
+                'detected_columns': {k: v for k, v in columns.items() if v is not None},
+                'sample_data': []
+            }
+            
+            # Generate sample preview
+            for idx, row in df.head(5).iterrows():
+                can_id, is_extended = parse_can_id(row[columns['can_id']], force_extended)
+                if can_id:
+                    dlc = parse_dlc(row[columns['dlc']]) if columns['dlc'] else 8
+                    timeout = parse_timeout(row[columns['timeout']], default_timeout) if columns['timeout'] else default_timeout
+                    data_bytes = parse_data_bytes(row[columns['data']], dlc) if columns['data'] else '00 00 00 00 00 00 00 00'
+                    
+                    preview_data['sample_data'].append({
+                        'can_id': can_id,
+                        'is_extended': is_extended,
+                        'dlc': dlc,
+                        'data': data_bytes,
+                        'timeout': timeout
+                    })
+            
+            # Clean up preview file
+            os.remove(file_path)
+            
+            return jsonify(preview_data), 200
+            
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
     
     return jsonify({'success': False, 'error': 'Invalid file type'}), 400
 
@@ -279,7 +442,12 @@ def download_file(filename):
 @app.route('/health')
 def health():
     """Health check endpoint"""
-    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+    return jsonify({
+        'status': 'healthy', 
+        'version': '2.0.0',
+        'features': ['extended_can_id', 'configurable_timeout', 'live_preview'],
+        'timestamp': datetime.now().isoformat()
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
