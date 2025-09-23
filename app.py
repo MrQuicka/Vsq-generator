@@ -324,7 +324,7 @@ def process_excel_to_vsq(file_path, output_name=None, default_timeout=3000,
 @app.route('/')
 def index():
     """Main page"""
-    return render_template('index_v2.html')
+    return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
