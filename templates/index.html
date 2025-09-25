@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VSQ Generator v2.0 - Advanced CAN Sequence Generator</title>
+    <title>VSQ Generator v3.0 - Advanced CAN Sequence Generator</title>
     <style>
         * {
             margin: 0;
@@ -202,6 +202,7 @@
             padding: 10px;
             background: #f0f0ff;
             border-radius: 8px;
+            margin-top: 10px;
         }
 
         .dark-mode .checkbox-group {
@@ -212,6 +213,25 @@
             width: 20px;
             height: 20px;
             cursor: pointer;
+        }
+
+        .cyclic-settings {
+            background: #fff3cd;
+            border: 1px solid #ffeeba;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .cyclic-settings.show {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        .dark-mode .cyclic-settings {
+            background: rgba(243, 156, 18, 0.2);
+            border-color: var(--warning);
         }
 
         .btn {
@@ -236,14 +256,30 @@
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
 
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .btn-secondary {
             background: #e0e7ff;
             color: var(--primary);
         }
 
+        .btn-secondary:hover {
+            background: #d0d9ff;
+            transform: translateY(-2px);
+        }
+
         .btn-success {
             background: linear-gradient(135deg, var(--success) 0%, #96c93d 100%);
             color: white;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 176, 155, 0.4);
         }
 
         .btn-group {
@@ -303,6 +339,11 @@
             color: white;
         }
 
+        .stat-cyclic {
+            background: var(--warning);
+            color: white;
+        }
+
         .preview-container {
             background: #2c3e50;
             color: #ecf0f1;
@@ -351,6 +392,11 @@
             color: #f39c12;
         }
 
+        .preview-cyclic {
+            color: #e74c3c;
+            font-style: italic;
+        }
+
         .result-container {
             margin-top: 30px;
             display: none;
@@ -383,6 +429,30 @@
             background: #fff3cd;
             border: 1px solid #ffeeba;
             color: #856404;
+        }
+
+        .dark-mode .result-warning {
+            background: rgba(243, 156, 18, 0.2);
+            border-color: var(--warning);
+            color: #f39c12;
+        }
+
+        .result-error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .result-info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+
+        .dark-mode .result-info {
+            background: rgba(23, 162, 184, 0.2);
+            border-color: #17a2b8;
+            color: #17a2b8;
         }
 
         .spinner {
@@ -441,17 +511,17 @@
 
         .tooltip .tooltiptext {
             visibility: hidden;
-            width: 200px;
+            width: 250px;
             background-color: #555;
             color: #fff;
             text-align: center;
             border-radius: 6px;
-            padding: 5px 10px;
+            padding: 8px 12px;
             position: absolute;
             z-index: 1;
             bottom: 125%;
             left: 50%;
-            margin-left: -100px;
+            margin-left: -125px;
             opacity: 0;
             transition: opacity 0.3s;
             font-size: 0.85em;
@@ -461,6 +531,22 @@
             visibility: visible;
             opacity: 1;
         }
+
+        .info-box {
+            margin-top: 15px;
+            padding: 12px;
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            border-radius: 8px;
+            font-size: 0.9em;
+            color: #0c5460;
+        }
+
+        .dark-mode .info-box {
+            background: rgba(23, 162, 184, 0.2);
+            border-color: #17a2b8;
+            color: #17a2b8;
+        }
     </style>
 </head>
 <body>
@@ -469,9 +555,9 @@
     </div>
 
     <div class="container">
-        <h1>🚀 VSQ Generator v2.0</h1>
+        <h1>🚀 VSQ Generator v3.0</h1>
         <div class="version-badge">
-            <span>Extended CAN ID | Custom Timeout | Live Preview</span>
+            <span>Auto ID Detection | Cyclic Messages | Custom Timeout | Live Preview</span>
         </div>
         
         <div class="main-grid">
@@ -517,7 +603,7 @@
                         <label for="timeout">
                             Výchozí timeout (ms):
                             <span class="tooltip">ℹ️
-                                <span class="tooltiptext">Časový limit pro odpověď. Rozsah: 1-60000 ms</span>
+                                <span class="tooltiptext">Časový limit pro odpověď. Rozsah: 100-10000 ms</span>
                             </span>
                         </label>
                         <div class="timeout-group">
@@ -527,13 +613,32 @@
                     </div>
 
                     <div class="checkbox-group">
-                        <input type="checkbox" id="forceExtended">
-                        <label for="forceExtended">
-                            Vynutit Extended CAN ID (29-bit)
+                        <input type="checkbox" id="enableCyclic">
+                        <label for="enableCyclic">
+                            🔄 Povolit cyklické odesílání
                             <span class="tooltip">ℹ️
-                                <span class="tooltiptext">Všechny ID budou považovány za extended (29-bit), i když jsou menší než 0x7FF</span>
+                                <span class="tooltiptext">Každá zpráva bude nastavena jako cyklická (Set Cyclic → Send → Stop)</span>
                             </span>
                         </label>
+                    </div>
+
+                    <div class="cyclic-settings" id="cyclicSettings">
+                        <label for="cycleTime">
+                            ⏱️ Cycle time (ms):
+                            <span class="tooltip">ℹ️
+                                <span class="tooltiptext">Perioda cyklického odesílání v milisekundách</span>
+                            </span>
+                        </label>
+                        <div class="timeout-group">
+                            <input type="range" id="cycleTime" min="10" max="1000" value="50" step="10">
+                            <div class="timeout-display" style="background: var(--warning);" id="cycleTimeDisplay">50 ms</div>
+                        </div>
+                    </div>
+
+                    <div class="info-box">
+                        <strong>ℹ️ Automatická detekce ID:</strong><br>
+                        • Standard (11-bit): 0x000 - 0x7FF<br>
+                        • Extended (29-bit): 0x800+ (automaticky přidá 'x')
                     </div>
                 </div>
 
@@ -557,6 +662,7 @@
                 <div class="preview-stats">
                     <span class="stat-badge stat-standard" id="standardCount">Standard: 0</span>
                     <span class="stat-badge stat-extended" id="extendedCount">Extended: 0</span>
+                    <span class="stat-badge stat-cyclic" id="cyclicStatus" style="display: none;">🔄 Cyclic</span>
                 </div>
             </div>
             <div class="preview-container" id="previewContainer"></div>
@@ -576,7 +682,10 @@
         const canChannel = document.getElementById('canChannel');
         const timeout = document.getElementById('timeout');
         const timeoutDisplay = document.getElementById('timeoutDisplay');
-        const forceExtended = document.getElementById('forceExtended');
+        const enableCyclic = document.getElementById('enableCyclic');
+        const cyclicSettings = document.getElementById('cyclicSettings');
+        const cycleTime = document.getElementById('cycleTime');
+        const cycleTimeDisplay = document.getElementById('cycleTimeDisplay');
         const previewBtn = document.getElementById('previewBtn');
         const processBtn = document.getElementById('processBtn');
         const spinner = document.getElementById('spinner');
@@ -587,9 +696,9 @@
         const themeIcon = document.getElementById('themeIcon');
         const standardCount = document.getElementById('standardCount');
         const extendedCount = document.getElementById('extendedCount');
+        const cyclicStatus = document.getElementById('cyclicStatus');
 
         let selectedFile = null;
-        let lastPreviewData = null;
 
         // Dark mode toggle
         darkModeToggle.addEventListener('click', () => {
@@ -607,6 +716,20 @@
         // Timeout slider
         timeout.addEventListener('input', (e) => {
             timeoutDisplay.textContent = e.target.value + ' ms';
+        });
+
+        // Cycle time slider
+        cycleTime.addEventListener('input', (e) => {
+            cycleTimeDisplay.textContent = e.target.value + ' ms';
+        });
+
+        // Cyclic checkbox
+        enableCyclic.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                cyclicSettings.classList.add('show');
+            } else {
+                cyclicSettings.classList.remove('show');
+            }
         });
 
         // File upload
@@ -671,7 +794,8 @@
             formData.append('file', selectedFile);
             formData.append('timeout', timeout.value);
             formData.append('can_channel', canChannel.value);
-            formData.append('force_extended', forceExtended.checked);
+            formData.append('enable_cyclic', enableCyclic.checked);
+            formData.append('cycle_time', cycleTime.value);
             
             spinner.classList.add('show');
             previewSection.classList.remove('show');
@@ -685,7 +809,6 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    lastPreviewData = result;
                     showPreview(result);
                 } else {
                     showResult('error', '❌ Chyba', result.error);
@@ -706,7 +829,8 @@
             formData.append('output_name', outputName.value || '');
             formData.append('timeout', timeout.value);
             formData.append('can_channel', canChannel.value);
-            formData.append('force_extended', forceExtended.checked);
+            formData.append('enable_cyclic', enableCyclic.checked);
+            formData.append('cycle_time', cycleTime.value);
             
             processBtn.disabled = true;
             spinner.classList.add('show');
@@ -741,20 +865,58 @@
             standardCount.textContent = `Standard: ${result.standard_ids || 0}`;
             extendedCount.textContent = `Extended: ${result.extended_ids || 0}`;
             
+            // Show cyclic badge if enabled
+            if (result.settings && result.settings.cyclic_enabled) {
+                cyclicStatus.style.display = 'inline-block';
+                cyclicStatus.textContent = `🔄 Cyclic (${result.settings.cycle_time}ms)`;
+            } else {
+                cyclicStatus.style.display = 'none';
+            }
+            
             // Generate preview HTML
             let previewHTML = '';
+            
+            if (result.settings && result.settings.cyclic_enabled) {
+                previewHTML += '<div style="color: #f39c12; margin-bottom: 10px;">⚠️ Cyklický režim - každá zpráva generuje 3 řádky (start/send/stop)</div>';
+            }
+            
             result.preview.forEach(line => {
                 const idClass = line.is_extended ? 'extended' : '';
                 const idDisplay = line.can_id + (line.is_extended ? ' (EXT)' : '');
                 
-                previewHTML += `
-                    <div class="preview-line">
-                        <span class="preview-line-number">${line.line_num}:</span>
-                        <span class="preview-can-id ${idClass}">${idDisplay}</span> | 
-                        <span class="preview-data">${line.data}</span> | 
-                        <span class="preview-timeout">${line.timeout}ms</span>
-                    </div>
-                `;
+                if (line.cyclic) {
+                    // Show cyclic preview (3 lines)
+                    previewHTML += `
+                        <div class="preview-line" style="opacity: 0.8;">
+                            <span class="preview-line-number">${line.line_num}a:</span>
+                            <span style="color: #e74c3c;">Set Cyclic</span> 
+                            <span class="preview-can-id ${idClass}">${idDisplay}</span> | 
+                            <span class="preview-cyclic">cycle: ${line.cycle_time}ms</span>
+                        </div>
+                        <div class="preview-line">
+                            <span class="preview-line-number">${line.line_num}b:</span>
+                            <span style="color: #27ae60;">Send</span> 
+                            <span class="preview-can-id ${idClass}">${idDisplay}</span> | 
+                            <span class="preview-data">${line.data}</span> | 
+                            <span class="preview-timeout">${line.timeout}ms</span>
+                        </div>
+                        <div class="preview-line" style="opacity: 0.8;">
+                            <span class="preview-line-number">${line.line_num}c:</span>
+                            <span style="color: #e74c3c;">Stop Cyclic</span> 
+                            <span class="preview-can-id ${idClass}">${idDisplay}</span>
+                        </div>
+                    `;
+                } else {
+                    // Normal preview (1 line)
+                    previewHTML += `
+                        <div class="preview-line">
+                            <span class="preview-line-number">${line.line_num}:</span>
+                            <span class="preview-can-id ${idClass}">${idDisplay}</span> | 
+                            <span class="preview-data">${line.data}</span> | 
+                            <span class="preview-timeout">${line.timeout}ms</span>
+                        </div>
+                    `;
+                }
             });
             
             if (result.messages_processed > 10) {
@@ -777,6 +939,10 @@
                         <p><strong>Výstupní soubor:</strong> ${result.filename}</p>
                         <p><strong>Zpracováno zpráv:</strong> ${result.messages_processed}</p>
                         <p><strong>Standard ID:</strong> ${result.standard_ids || 0} | <strong>Extended ID:</strong> ${result.extended_ids || 0}</p>
+                        ${result.settings && result.settings.cyclic_enabled ? 
+                            `<p><strong>Cyklický režim:</strong> ✅ Aktivní (${result.settings.cycle_time}ms)</p>
+                             <p><strong>Generováno řádků:</strong> ${result.messages_processed * 3} (3 řádky na zprávu)</p>` : 
+                            '<p><strong>Režim:</strong> Normální (1 řádek na zprávu)</p>'}
                     </div>
                     <div style="margin-top: 20px; text-align: center;">
                         <a href="/download/${result.filename}" class="btn btn-success">
@@ -785,6 +951,19 @@
                     </div>
                 </div>
             `;
+            
+            if (result.detected_columns) {
+                html += `
+                    <div class="result-box result-info" style="margin-top: 15px;">
+                        <h4>ℹ️ Detekované sloupce</h4>
+                        <ul style="margin-top: 10px; list-style: none; padding-left: 0;">
+                            ${Object.entries(result.detected_columns)
+                                .map(([key, value]) => `<li>• ${key}: <strong>${value}</strong></li>`)
+                                .join('')}
+                        </ul>
+                    </div>
+                `;
+            }
             
             if (result.warnings && result.warnings.length > 0) {
                 html += `
